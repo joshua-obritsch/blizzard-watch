@@ -19,15 +19,14 @@ synopsis:           A CSS generator for blizzard-html.
 version:            0.1.0.0
 
 executable blizzard-watch
-    build-depends:      base             >= 4.0  && <= 5.0
+    build-depends:      base          >= 4.0  && <= 5.0
                       , blizzard-html
-                      , bytestring       >= 0.10 && <= 0.12
-                      , clay             >= 0.13 && <= 15
-                      , fsnotify         >= 0.3  && <= 0.4
-                      , haskell-src-exts >= 1.23 && <= 1.24
-                      , hint             >= 0.9  && <= 0.10
-                      , murmur3          >= 1.0  && <= 2.0
-                      , text             >= 1.0  && <= 3.0
+                      , bytestring    >= 0.10 && <= 0.12
+                      , fsnotify      >= 0.3  && <= 0.4
+                      , hint          >= 0.9  && <= 0.10
+                      , murmur3       >= 1.0  && <= 2.0
+                      , regex-pcre    >= 0.94
+                      , text          >= 1.0  && <= 3.0
     default-language:   Haskell2010
     hs-source-dirs:     src
     main-is:            Main.hs
