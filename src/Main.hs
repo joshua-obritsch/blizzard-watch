@@ -5,11 +5,14 @@ module Main where
 
 
 import Prelude hiding (null)
+
 import Blizzard.Html (Attribute(..))
+import Clay (Css)
 import Clay.Render (compact, renderWith)
 import Control.Concurrent (threadDelay)
-import Control.Monad (forM, forever)
+import Control.Monad ((<=<), forM, forever)
 import Data.ByteString.Lazy (toStrict)
+import Data.Functor ((<&>))
 import Data.Hash.Murmur (murmur3)
 import Data.List (intercalate)
 import Data.List.Split (splitOn)
@@ -44,29 +47,46 @@ loadFile = \case
 
 
 parseFile :: String -> IO ()
-parseFile path = do
-    file <- readFile path
-    css <- forM (parseCss file) $ \parsedCss -> do
-        interpretProps parsedCss
-    print $ zipCss . filter (not . null) $ css
+parseFile path
+     =  readFile path
+    >>= mapM interpretProps . parseCss
+    >>= print
+     .  zipCss
+     .  filter (not . null)
 
 
-hashedCss :: Text -> Text
-hashedCss = pack . ('_' :) . show . murmur3 15739 . toStrict . encodeUtf8
+hashCss :: Text -> Text
+hashCss
+    = pack
+    . ('_' :)
+    . show
+    . murmur3 15739
+    . toStrict
+    . encodeUtf8
 
 
 zipCss :: [Text] -> [(Text, Text)]
-zipCss = map (\x -> (hashedCss x, x))
+zipCss = map (\x -> (hashCss x, x))
 
 
 parseCss :: String -> [[String]]
-parseCss str = map (splitOn "," . firstLast . dropWhile (/= '[')) (getAllTextMatches (str =~ regex) :: [String])
+parseCss
+    = map extract
+    . match
 
 
-firstLast:: [a] -> [a]
-firstLast [] = []
-firstLast [x] = []
-firstLast xs = tail (init xs)
+extract :: String -> [String]
+extract
+    = splitOn ","
+    . tail
+    . init
+    . dropWhile (/= '[')
+
+
+match :: String -> [String]
+match
+    = getAllTextMatches
+    . flip (=~) regex
 
 
 regex :: String
@@ -86,11 +106,15 @@ interpretProp css = runInterpreter $ do
 
 
 interpretProps :: [String] -> IO Text
-interpretProps props = do
-    css <- forM props $ \prop -> do
-        interpretProp prop
-            >>= \case
-                Left  _             -> pure Nothing
-                Right (AttrCss css) -> pure $ Just css
-                Right (AttrRaw _ _) -> pure Nothing
-    pure $ renderWith compact [] . mconcat . catMaybes $ css
+interpretProps props
+     =  mapM (interpretCss <=< interpretProp) props
+    <&> renderWith compact []
+     .  mconcat
+     .  catMaybes
+
+
+interpretCss :: Either InterpreterError Attribute -> IO (Maybe Css)
+interpretCss = \case
+    Right (AttrCss css) -> pure $ Just css
+    Right (AttrRaw _ _) -> pure   Nothing
+    Left  _             -> pure   Nothing
