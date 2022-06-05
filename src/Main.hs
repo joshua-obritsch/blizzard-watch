@@ -24,7 +24,7 @@ import System.Directory.Recursive (getFilesRecursive)
 import System.Environment
 import System.Exit
 import System.FSNotify
-import Text.Regex.Posix ((=~), getAllTextMatches)
+import Text.Regex.PCRE ((=~), getAllTextMatches)
 
 import qualified Data.HashTable.IO as Dict
 
@@ -125,25 +125,35 @@ zipCss = map (\x -> (hashCss x, x))
 parseCss :: String -> [[String]]
 parseCss
     = map extract
-    . match
+    . matchCss
 
 
 extract :: String -> [String]
 extract
-    = splitOn ","
+    = matchComma
     . tail
     . init
     . dropWhile (/= '[')
 
 
-match :: String -> [String]
-match
+matchComma :: String -> [String]
+matchComma
     = getAllTextMatches
-    . flip (=~) regex
+    . flip (=~) commaRegex
 
 
-regex :: String
-regex = "([^[:alnum:]_']|\n|^)(docType|docTypeHtml|a|abbr|address|area|article|aside|audio|b|base|bdo|blockquote|body|br|button|canvas|caption|cite|code|col|colgroup|command|datalist|dd|del|details|dfn|div|dl|dt|em|embed|fieldset|figcaption|figure|footer|form|h1|h2|h3|h4|h5|h6|head|header|hgroup|hr|html|i|iframe|img|input|ins|kbd|keygen|label|legend|li|link|main|map|mark|menu|menuitem|meta|meter|nav|noscript|object|ol|optgroup|option|output|p|param|pre|progress|q|rp|rt|ruby|samp|script|section|select|small|source|span|strong|style|sub|summary|sup|table|tbody|td|textarea|tfoot|th|thead|time|title|tr|track|u|ul|var|video|wbr)(\\s|\n)*\\[([^]]|\n)*\\]"
+matchCss :: String -> [String]
+matchCss
+    = getAllTextMatches
+    . flip (=~) cssRegex
+
+
+commaRegex :: String
+commaRegex = "(?:(\\[(?:[^\\[\\]]|(?1))*\\])|[^,])+(?=,)?"
+
+
+cssRegex :: String
+cssRegex = "(?:[^[:alnum:]_']|^)(?:docType|docTypeHtml|a|abbr|address|area|article|aside|audio|b|base|bdo|blockquote|body|br|button|canvas|caption|cite|code|col|colgroup|command|datalist|dd|del|details|dfn|div|dl|dt|em|embed|fieldset|figcaption|figure|footer|form|h1|h2|h3|h4|h5|h6|head|header|hgroup|hr|html|i|iframe|img|input|ins|kbd|keygen|label|legend|li|link|main|map|mark|menu|menuitem|meta|meter|nav|noscript|object|ol|optgroup|option|output|p|param|pre|progress|q|rp|rt|ruby|samp|script|section|select|small|source|span|strong|style|sub|summary|sup|table|tbody|td|textarea|tfoot|th|thead|time|title|tr|track|u|ul|var|video|wbr)(?:\\s*)(\\[(?:[^\\[\\]]|(?1))*\\])"
 
 
 interpretProp :: String -> IO (Either InterpreterError Attribute)
