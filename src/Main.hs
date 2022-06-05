@@ -14,74 +14,81 @@ import Control.Monad ((<=<), forM_, forever)
 import Data.ByteString.Lazy (toStrict)
 import Data.Functor ((<&>))
 import Data.Hash.Murmur (murmur3)
-import Data.List (intercalate)
+import Data.List (intercalate, isSuffixOf)
 import Data.List.Split (splitOn)
 import Data.Maybe (catMaybes)
 import Data.Text.Lazy (Text, pack, null)
 import Data.Text.Lazy.IO (writeFile)
 import Data.Text.Lazy.Encoding (encodeUtf8)
 import Language.Haskell.Interpreter
+import System.Directory.Recursive (getFilesRecursive)
 import System.FSNotify
 import Text.Regex.Posix ((=~), getAllTextMatches)
 
 import qualified Data.HashTable.IO as Dict
 
 
-type Dict = Dict.BasicHashTable String [(Text, Text)]
-type Hash = Dict.BasicHashTable Text Text
+type FileDict = Dict.BasicHashTable String [(Text, Text)]
+type HashDict = Dict.BasicHashTable Text Text
 
 
 main :: IO ()
-main =
+main = do
+    fileDict <- Dict.new :: IO FileDict
+    files <- getFilesRecursive "./src"
+    mapM_ (parseFile fileDict) $ filter (isSuffixOf ".hs") files
+    writeCss fileDict
     withManager $ \mgr -> do
-        dict <- Dict.new :: IO Dict
-
-        -- start a watching job (in the background)
         watchTree
-            mgr           -- manager
-            "./src"       -- directory to watch
-            (const True)  -- predicate
-            (loadFile dict) -- action
-
-        -- sleep forever (until interrupted)
+            mgr
+            "./src"
+            (const True)
+            (loadFile fileDict)
         forever $ threadDelay 1000000
 
 
-loadFile :: Dict -> Action
-loadFile dict = \case
-    Added    path _ _ -> parseFile dict path
-    Modified path _ _ -> parseFile dict path
-    Removed  path _ _ -> pure ()
+loadFile :: FileDict -> Action
+loadFile fileDict = \case
+    Added    path _ _ -> do parseFile fileDict path; writeCss fileDict
+    Modified path _ _ -> do parseFile fileDict path; writeCss fileDict
+    Removed  path _ _ -> do parseFile fileDict path; writeCss fileDict
     Unknown  {}       -> pure ()
 
 
-parseFile :: Dict -> String -> IO ()
-parseFile dict path
-     =  readFile path
-    >>= mapM interpretProps . parseCss
-    >>= updateDict dict path
-     .  zipCss
-     .  filter (not . null)
+parseFile :: FileDict -> String -> IO ()
+parseFile fileDict filePath = do
+    fileContents <- readFile filePath
+    parsedCss    <- mapM interpretProps $ parseCss fileContents
+    updateDict fileDict filePath parsedCss
 
 
-updateDict :: Dict -> String -> [(Text, Text)] -> IO ()
-updateDict dict key value = do
-    hash <- Dict.new :: IO Hash
-    Dict.insert dict key value
-    Dict.mapM_ (updateHash hash) dict
-    Dict.foldM concatHash "" hash
-        >>= writeFile "app.css"
+updateDict :: FileDict -> String -> [Text] -> IO ()
+updateDict fileDict key value = do
+    Dict.insert fileDict key
+        $ zipCss
+        . filter (not . null)
+        $ value
+
+
+writeCss :: FileDict -> IO ()
+writeCss fileDict = do
+    outputText <- generateOutput fileDict
+    writeFile "app.css" outputText
+
+
+generateOutput :: FileDict -> IO Text
+generateOutput fileDict = do
+    hashDict <- Dict.new :: IO HashDict
+    Dict.mapM_ (updateHash hashDict) fileDict
+    Dict.foldM concatHash "" hashDict
 
 
 concatHash :: Text -> (Text, Text) -> IO Text
-concatHash a (b, c) =
-    pure $ a <> b <> c
+concatHash a (b, c) = pure $ a <> b <> c
 
 
-updateHash :: Hash -> (String, [(Text, Text)]) -> IO ()
-updateHash hash (_, v) = do
-    forM_ v $ \(k, v) -> do
-        Dict.insert hash k v
+updateHash :: HashDict -> (String, [(Text, Text)]) -> IO ()
+updateHash hash (_, v) = forM_ v $ uncurry (Dict.insert hash)
 
 
 hashCss :: Text -> Text
@@ -136,11 +143,13 @@ interpretProp css = runInterpreter $ do
 
 
 interpretProps :: [String] -> IO Text
-interpretProps props
-     =  mapM (interpretCss <=< interpretProp) props
-    <&> renderWith compact []
-     .  mconcat
-     .  catMaybes
+interpretProps props = do
+    css <- mapM (interpretCss <=< interpretProp) props
+    pure
+        $ renderWith compact []
+        . mconcat
+        . catMaybes
+        $ css
 
 
 interpretCss :: Either InterpreterError Attribute -> IO (Maybe Css)
