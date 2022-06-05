@@ -10,11 +10,10 @@ import Blizzard.Html (Attribute(..))
 import Clay (Css)
 import Clay.Render (compact, renderWith)
 import Control.Concurrent (threadDelay)
-import Control.Monad ((<=<), forM_, forever)
+import Control.Monad ((<=<), forM_, forever, when)
 import Data.ByteString.Lazy (toStrict)
-import Data.Functor ((<&>))
 import Data.Hash.Murmur (murmur3)
-import Data.List (intercalate, isSuffixOf)
+import Data.List (isSuffixOf)
 import Data.List.Split (splitOn)
 import Data.Maybe (catMaybes)
 import Data.Text.Lazy (Text, pack, null)
@@ -22,6 +21,8 @@ import Data.Text.Lazy.IO (writeFile)
 import Data.Text.Lazy.Encoding (encodeUtf8)
 import Language.Haskell.Interpreter
 import System.Directory.Recursive (getFilesRecursive)
+import System.Environment
+import System.Exit
 import System.FSNotify
 import Text.Regex.Posix ((=~), getAllTextMatches)
 
@@ -34,25 +35,40 @@ type HashDict = Dict.BasicHashTable Text Text
 
 main :: IO ()
 main = do
+    args <- getArgs
+    when (length args < 2) $ do
+        die "Error: Missing arguments. Please specify (1) a directory to watch and (2) the name of the output file."
+    let sourceDir = head args
+    let outputDir = args !! 1
+    putStrLn $ "Watching " <> sourceDir <> " for changes..."
     fileDict <- Dict.new :: IO FileDict
-    files <- getFilesRecursive "./src"
+    files <- getFilesRecursive sourceDir
     mapM_ (parseFile fileDict) $ filter (isSuffixOf ".hs") files
-    writeCss fileDict
+    writeCss fileDict outputDir
     withManager $ \mgr -> do
         watchTree
             mgr
-            "./src"
+            sourceDir
             (const True)
-            (loadFile fileDict)
+            (loadFile fileDict outputDir)
         forever $ threadDelay 1000000
 
 
-loadFile :: FileDict -> Action
-loadFile fileDict = \case
-    Added    path _ _ -> do parseFile fileDict path; writeCss fileDict
-    Modified path _ _ -> do parseFile fileDict path; writeCss fileDict
-    Removed  path _ _ -> do parseFile fileDict path; writeCss fileDict
-    Unknown  {}       -> pure ()
+loadFile :: FileDict -> String -> Action
+loadFile fileDict outputDir = \case
+    Added path _ _ -> do
+        putStrLn $ "New file detected. Updating " <> outputDir <> "..."
+        parseFile fileDict path
+        writeCss fileDict outputDir
+    Modified path _ _ -> do
+        putStrLn $ "File change detected. Updating " <> outputDir <> "..."
+        parseFile fileDict path
+        writeCss fileDict outputDir
+    Removed path _ _ -> do
+        putStrLn $ "File deletion detected. Updating " <> outputDir <> "..."
+        Dict.delete fileDict path
+        writeCss fileDict outputDir
+    Unknown {} -> pure ()
 
 
 parseFile :: FileDict -> String -> IO ()
@@ -70,10 +86,10 @@ updateDict fileDict key value = do
         $ value
 
 
-writeCss :: FileDict -> IO ()
-writeCss fileDict = do
+writeCss :: FileDict -> String -> IO ()
+writeCss fileDict outputDir = do
     outputText <- generateOutput fileDict
-    writeFile "app.css" outputText
+    writeFile outputDir outputText
 
 
 generateOutput :: FileDict -> IO Text
